@@ -202,7 +202,15 @@ function connectGoogleDrive(){
         form.append('token', response.access_token);
         form.append('email', '');
         try{
-          const saveResponse = await fetch(API_URL, {method: 'POST', body: form});
+          const saveResponse = await fetch(API_URL, {
+  method: 'POST',
+  body: form,
+  redirect: 'follow'
+});
+
+console.log("POST status:", saveResponse.status);
+console.log("POST URL:", saveResponse.url);
+console.log("POST response:", await saveResponse.clone().text());
           const raw = await saveResponse.text();
 console.log("Apps Script HTTP status:", saveResponse.status);
 console.log("Apps Script response URL:", saveResponse.url);
