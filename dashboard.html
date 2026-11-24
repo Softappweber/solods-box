@@ -28,6 +28,70 @@ header{display:flex;justify-content:space-between;align-items:center;margin-bott
 .brand-icon{width:42px;height:42px;background:linear-gradient(135deg,var(--accent),var(--accent2));border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:#fff}
 .brand h1{font-size:20px;font-weight:700}
 .brand p{font-size:11px;color:var(--text3);margin-top:2px}
+  .account-chip{
+  display:none;
+  align-items:center;
+  gap:10px;
+  margin-left:8px;
+  padding:7px 13px 7px 8px;
+  border:1px solid color-mix(in srgb,var(--accent) 40%,var(--border));
+  border-radius:14px;
+  background:linear-gradient(135deg,
+    color-mix(in srgb,var(--accent) 12%,var(--surface)),
+    color-mix(in srgb,var(--accent2) 10%,var(--surface)));
+  box-shadow:0 3px 14px rgba(0,0,0,.12);
+  max-width:260px;
+  min-width:0;
+  animation:accountAppear .45s ease;
+}
+.account-avatar{
+  width:34px;
+  height:34px;
+  flex-shrink:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:11px;
+  color:#fff;
+  font-size:15px;
+  font-weight:800;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  box-shadow:0 3px 10px color-mix(in srgb,var(--accent) 30%,transparent);
+}
+.account-details{
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+  gap:3px;
+}
+.account-details strong{
+  color:var(--text);
+  font-size:12px;
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.account-details small{
+  color:var(--text2);
+  font-size:10px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.account-check{
+  color:#22c55e;
+  font-size:15px;
+  font-weight:800;
+  margin-left:2px;
+}
+@keyframes accountAppear{
+  from{opacity:0;transform:translateY(5px)}
+  to{opacity:1;transform:translateY(0)}
+}
+@media(max-width:700px){
+  .account-chip{max-width:220px;margin-left:0}
+}
 .header-right{display:flex;align-items:center;gap:10px}
 #status{font-size:11px;color:var(--text2);background:var(--surface2);padding:6px 14px;border-radius:20px;border:1px solid var(--border);font-weight:500}
 .theme-select{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:8px 12px;color:var(--text);font-size:13px;cursor:pointer;font-weight:500}
@@ -82,7 +146,25 @@ button.primary:hover{transform:translateY(-2px)}
 </div>
 <div class="app" id="mainContent" style="display:none;">
 <header>
-  <div class="brand"><div class="brand-icon">B</div><div><h1>Box</h1><p>Personal Cloud</p></div></div>
+ <div class="brand">
+  <div class="brand-icon">B</div>
+
+  <div>
+    <h1>Box</h1>
+    <p>Personal Cloud</p>
+  </div>
+
+  <div class="account-chip" id="googleAccountChip">
+    <div class="account-avatar" id="googleAccountAvatar">G</div>
+
+    <div class="account-details">
+      <strong id="googleAccountName">Google Account</strong>
+      <small id="googleAccountEmail">Connected account</small>
+    </div>
+
+    <span class="account-check">✓</span>
+  </div>
+</div>
   <div class="header-right">
     <span id="status">Ready</span>
     <select class="theme-select" id="themeSelect" onchange="changeTheme(this.value)">
@@ -162,18 +244,22 @@ function checkLogin(){
       showConnect();
     }
   }, 15000);
-  window[callback] = (result) => {
-    clearTimeout(timeoutId);
-    delete window[callback];
-    script.remove();
-    if(result.ok && result.token){
-      accessToken = result.token;
-      localStorage.setItem('box_token_' + userName, result.token);
-      showDashboard();
-    } else {
-      showConnect();
-    }
-  };
+ window[callback] = (result) => {
+  clearTimeout(timeoutId);
+  delete window[callback];
+  script.remove();
+
+  if(result.ok && result.token){
+    accessToken = result.token;
+    localStorage.setItem('box_token_' + userName, result.token);
+
+    updateGoogleAccount(result);
+
+    showDashboard();
+  } else {
+    showConnect();
+  }
+};
   script.src = API_URL + '?action=checkLogin&user=' + encodeURIComponent(userName) + '&callback=' + callback;
   document.body.appendChild(script);
 }
@@ -246,6 +332,32 @@ function showDashboard(){
   document.getElementById('connectSection').style.display = 'none';
   document.getElementById('mainContent').style.display = 'block';
   loadItems(currentTab);
+}
+
+  function updateGoogleAccount(account){
+  const chip = document.getElementById('googleAccountChip');
+  const nameEl = document.getElementById('googleAccountName');
+  const emailEl = document.getElementById('googleAccountEmail');
+  const avatarEl = document.getElementById('googleAccountAvatar');
+
+  if(!chip || !nameEl || !emailEl || !avatarEl) return;
+
+  const name = String(
+    account.displayName || account.name || account.email || ''
+  ).trim();
+
+  const email = String(account.email || '').trim();
+
+  if(!name && !email){
+    chip.style.display = 'none';
+    return;
+  }
+
+  nameEl.textContent = name || 'Google Account';
+  emailEl.textContent = email || 'Connected Google Drive';
+  avatarEl.textContent = (name || email).charAt(0).toUpperCase();
+
+  chip.style.display = 'flex';
 }
 
 function connectGoogleDrive(){
