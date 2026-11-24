@@ -203,7 +203,19 @@ function connectGoogleDrive(){
         form.append('email', '');
         try{
           const saveResponse = await fetch(API_URL, {method: 'POST', body: form});
-          const saved = await saveResponse.json();
+          const raw = await saveResponse.text();
+console.log("Apps Script HTTP status:", saveResponse.status);
+console.log("Apps Script response URL:", saveResponse.url);
+console.log("Apps Script raw response:", raw);
+
+let saved;
+try {
+  saved = JSON.parse(raw);
+} catch (err) {
+  throw new Error(
+    "Apps Script did not return JSON. Response: " + raw.slice(0, 300)
+  );
+}
           if(!saved.ok) throw new Error(saved.error || 'Could not save Google authorization.');
           localStorage.setItem('box_token_' + userName, response.access_token);
           showDashboard();
