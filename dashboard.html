@@ -127,7 +127,7 @@ document.getElementById('themeSelect').value = savedTheme;
     const script = document.createElement('script');
     script.src = './' + userName + '/config.js';
     script.onload = () => {
-      if (!window.USER_CONFIG || !USER_CONFIG.apiUrl) {
+      if (typeof USER_CONFIG === 'undefined' || !USER_CONFIG.apiUrl) {
         alert('Customer config.js is missing apiUrl.');
         showConnect();
         return;
