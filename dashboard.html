@@ -376,7 +376,10 @@ function connectGoogleDrive(){
           const saved = await apiPost(form);
           if(!saved.ok) throw new Error(saved.error || 'Could not save Google authorization.');
           localStorage.setItem('box_token_' + userName, response.access_token);
-          showDashboard();
+
+updateGoogleAccount(saved);
+
+showDashboard();
         }catch(e){
           accessToken = '';
           localStorage.removeItem('box_token_' + userName);
