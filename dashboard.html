@@ -193,6 +193,9 @@ let API_URL = '';
 let currentTab = "photos";
 let userName = '';
 let accessToken = ''; // Always load the token for the active customer below.
+let oauthStateValue = '';
+let oauthStateCreatedAt = 0;
+let oauthStatePromise = null;
 
   // Give the storage meter access to the existing Google Drive token
 window.solodsGetDriveToken = () => accessToken;
@@ -215,6 +218,9 @@ document.getElementById('themeSelect').value = savedTheme;
         return;
       }
       API_URL = USER_CONFIG.apiUrl;
+      // Prepare a short-lived server-issued OAuth state before the user clicks.
+      // This keeps the Google popup request inside the original click gesture.
+      fetchOAuthState().catch(error => console.warn('OAuth state preparation:', error.message));
       // Always ask the backend to validate the saved customer token.
       // Browser localStorage alone cannot tell whether Google's short-lived
       // access token has expired or been revoked.
@@ -227,6 +233,54 @@ document.getElementById('themeSelect').value = savedTheme;
     document.body.appendChild(script);
   }catch(e){ checkLogin(); }
 })();
+
+
+function fetchOAuthState(){
+  if (oauthStatePromise) return oauthStatePromise;
+
+  oauthStatePromise = new Promise((resolve, reject) => {
+    const callback = 'cb_auth_state_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+    const script = document.createElement('script');
+    let finished = false;
+
+    const finish = (error, result) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeoutId);
+      delete window[callback];
+      script.remove();
+      oauthStatePromise = null;
+
+      if (error) {
+        reject(error);
+        return;
+      }
+      if (!result || !result.ok || !result.state) {
+        reject(new Error((result && result.error) || 'The server did not provide an OAuth security state.'));
+        return;
+      }
+
+      oauthStateValue = result.state;
+      oauthStateCreatedAt = Date.now();
+      resolve(oauthStateValue);
+    };
+
+    const timeoutId = setTimeout(
+      () => finish(new Error('OAuth security-state request timed out.')),
+      15000
+    );
+
+    window[callback] = result => finish(null, result);
+    script.onerror = () => finish(new Error('Could not contact the SoloDS Box backend for OAuth state.'));
+    script.src = API_URL
+      + '?action=authState&user=' + encodeURIComponent(userName)
+      + '&callback=' + encodeURIComponent(callback)
+      + '&_=' + Date.now();
+    document.body.appendChild(script);
+  });
+
+  return oauthStatePromise;
+}
 
 function checkLogin(){
   if (!API_URL) {
@@ -361,35 +415,93 @@ function showDashboard(){
 }
 
 function connectGoogleDrive(){
-  const tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: GOOGLE_CLIENT_ID,
-    scope: GOOGLE_SCOPES,
-    callback: async (response) => {
-      if(response.access_token){
-        accessToken = response.access_token;
-        const form = new URLSearchParams();
-        form.append('action', 'saveToken');
-        form.append('userName', userName);
-        form.append('token', response.access_token);
-        form.append('email', '');
-        try{
-          const saved = await apiPost(form);
-          if(!saved.ok) throw new Error(saved.error || 'Could not save Google authorization.');
-          localStorage.setItem('box_token_' + userName, response.access_token);
+  // Fetching state must happen before the click that opens Google's popup.
+  // If it is not ready (or has aged out), prepare it and ask for one more click.
+  const stateIsFresh = oauthStateValue && (Date.now() - oauthStateCreatedAt < 4 * 60 * 1000);
+  if (!stateIsFresh) {
+    setStatus('Preparing secure Google login...');
+    fetchOAuthState().then(() => {
+      setStatus('Ready');
+      alert('Secure login is ready. Please click “Connect Google Drive” once more.');
+    }).catch(error => {
+      setStatus('Login preparation failed');
+      alert('Could not prepare Google login: ' + error.message);
+      showConnect();
+    });
+    return;
+  }
 
-updateGoogleAccount(saved);
+  if (!window.google || !google.accounts || !google.accounts.oauth2) {
+    alert('Google Identity Services is not ready. Please wait a moment and try again.');
+    return;
+  }
 
-showDashboard();
-        }catch(e){
-          accessToken = '';
-          localStorage.removeItem('box_token_' + userName);
-          alert('Google Drive connection could not be saved: ' + e.message);
+  const stateForThisLogin = oauthStateValue;
+
+  try {
+    const codeClient = google.accounts.oauth2.initCodeClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: GOOGLE_SCOPES,
+      ux_mode: 'popup',
+      state: stateForThisLogin,
+      callback: async response => {
+        if (response && response.error) {
+          alert('Google login was not completed: ' + response.error);
           showConnect();
+          return;
         }
+        if (!response || !response.code) {
+          alert('Google did not return an authorization code. Please try again.');
+          showConnect();
+          return;
+        }
+
+        setStatus('Saving secure Google connection...');
+        const form = new URLSearchParams();
+        form.append('action', 'exchangeCode');
+        form.append('userName', userName);
+        form.append('code', response.code);
+        form.append('state', stateForThisLogin);
+        form.append('origin', window.location.origin);
+
+        try {
+          const result = await apiPost(form);
+          if (!result.token) {
+            throw new Error('The backend did not return a Google access token.');
+          }
+
+          accessToken = result.token;
+          updateGoogleAccount(result);
+          oauthStateValue = '';
+          oauthStateCreatedAt = 0;
+          showDashboard();
+
+          // Prepare a fresh state in the background for a possible reconnect.
+          fetchOAuthState().catch(error =>
+            console.warn('Could not prefetch the next OAuth state:', error.message)
+          );
+        } catch (error) {
+          accessToken = '';
+          alert('Google Drive connection could not be saved: ' + error.message);
+          showConnect();
+          fetchOAuthState().catch(() => {});
+        }
+      },
+      error_callback: error => {
+        const message = error && (error.message || error.type)
+          ? (error.message || error.type)
+          : 'Google sign-in popup could not be opened.';
+        alert('Google login error: ' + message);
+        showConnect();
       }
-    }
-  });
-  tokenClient.requestAccessToken();
+    });
+
+    // Must run synchronously from the button click so the browser allows the popup.
+    codeClient.requestCode();
+  } catch (error) {
+    alert('Could not start Google login: ' + error.message);
+    showConnect();
+  }
 }
 
 document.querySelectorAll("nav button").forEach(btn=>{
